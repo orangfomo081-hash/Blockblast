@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Blast Ultra Arcade</title>
+    <style>
+        :root {
+            --bg-color: #0b0c10;
+            --container-bg: #1f2833;
+            --accent-glow: #00f0ff;
+            --grid-empty: #151a22;
+        }
+
+        body {
+            background: radial-gradient(circle at center, #1a2230 0%, var(--bg-color) 100%);
+            color: #ffffff;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+        }
+
+        #game-wrapper {
+            position: relative;
+            background: rgba(31, 40, 51, 0.6);
+            padding: 25px;
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 
+                        inset 0 0 20px rgba(0, 240, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 0 10px;
+        }
+
+        .title-neon {
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #fff;
+            text-shadow: 0 0 10px var(--accent-glow);
+        }
+
+        #score-container {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px 20px;
+            border-radius: 50px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+        }
+
+        #score-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #85929E;
+            letter-spacing: 1px;
+            text-align: center;
+        }
+
+        #score {
+            font-size: 26px;
+            font-weight: 900;
+            color: var(--accent-glow);
+            text-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+            text-align: center;
+        }
+
+        canvas {
+            background: #0f131a;
+            border-radius: 16px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            display: block;
+            cursor: grab;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+
+        #game-over-screen {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(7, 10, 15, 0.95);
+            border-radius: 24px;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            backdrop-filter: blur(8px);
+        }
+
+        #game-over-screen h2 {
+            font-size: 36px;
+            font-weight: 900;
+            color: #ff3366;
+            margin-bottom: 5px;
+            text-shadow: 0 0 20px rgba(255, 51, 102, 0.4);
+        }
+
+        #game-over-screen p {
+            color: #a0aec0;
+            font-size: 16px;
+            margin-bottom: 25px;
+        }
+
+        #restart-btn {
+            background: linear-gradient(135deg, #00f0ff, #0077ff);
+            color: #fff;
+            border: none;
+            padding: 14px 35px;
+            font-size: 16px;
+            font-weight: 700;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 20px rgba(0, 240, 255, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        #restart-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 240, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-wrapper">
+        <div class="header">
+            <div class="title-neon">BLAST ULTRA</div>
+            <div id="score-container">
+                <div id="score-label">SCORE</div>
+                <div id="score">0</div>
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="420" height="600"></canvas>
+
+        <div id="game-over-screen">
+            <h2>GAME OVER</h2>
+            <p>Skor Tertinggi Anda: <span id="final-score">0</span></p>
+            <button id="restart-btn" onclick="resetGame()">Main Lagi</button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreEl = document.getElementById('final-score');
+
+    // Audio Engine menggunakan Web Audio API (Tidak butuh aset file eksternal)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        if (type === 'pickup') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+        } else if (type === 'place') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.15);
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.15);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+        } else if (type === 'blast') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.3);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+        } else if (type === 'gameover') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(300, audioCtx.currentTime);
+            osc.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 0.6);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.6);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.6);
+        }
+    }
+
+    const GRID_SIZE = 8;
+    const CELL_SIZE = 46;
+    const GRID_OFFSET_X = 26;
+    const GRID_OFFSET_Y = 25;
+
+    let score = 0;
+    let grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+    let pieces = [];
+    let selectedPiece = null;
+    let dragOffset = { x: 0, y: 0 };
+    let particles = [];
+
+    // Desain Warna Neon Glossy & Glassmorphism Bertekstur
+    const SHAPES = [
+        { matrix: [[1]], color: '#ff3366', glow: 'rgba(255,51,102,0.5)' }, 
+        { matrix: [[1, 1]], color: '#ff9933', glow: 'rgba(255,153,51,0.5)' }, 
+        { matrix: [[1], [1]], color: '#ff9933', glow: 'rgba(255,153,51,0.5)' }, 
+        { matrix: [[1, 1, 1]], color: '#00f0ff', glow: 'rgba(0,240,255,0.5)' }, 
+        { matrix: [[1], [1], [1]], color: '#00f0ff', glow: 'rgba(0,240,255,0.5)' },
+        { matrix: [[1, 1], [1, 1]], color: '#39ff14', glow: 'rgba(57,255,20,0.5)' }, 
+        { matrix: [[1, 1, 1], [0, 1, 0]], color: '#b533ff', glow: 'rgba(181,51,255,0.5)' }, 
+        { matrix: [[1, 0], [1, 0], [1, 1]], color: '#ff33cc', glow: 'rgba(255,51,204,0.5)' }
+    ];
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x; this.y = y; this.color = color;
+            this.size = Math.random() * 4 + 2;
+            this.speedX = (Math.random() - 0.5) * 8;
+            this.speedY = (Math.random() - 0.5) * 8;
+            this.alpha = 1;
+        }
+        update() {
+            this.x += this.speedX; this.y += this.speedY;
+            this.alpha -= 0.03;
+        }
+        draw() {
+            ctx.save();
+            ctx.globalAlpha = this.alpha;
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    class Piece {
+        constructor(shape, index) {
+            this.matrix = shape.matrix;
+            this.color = shape.color;
+            this.glow = shape.glow;
+            this.index = index;
+            this.resetPosition();
+        }
+
+        resetPosition() {
+            this.isDragging = false;
+            this.currentCellSize = CELL_SIZE * 0.55;
+            this.width = this.matrix[0].length * this.currentCellSize;
+            this.height = this.matrix.length * this.currentCellSize;
+            this.x = 45 + this.index * 125;
+            this.y = 465;
+        }
+
+        draw() {
+            let size = this.isDragging ? CELL_SIZE : this.currentCellSize;
+            ctx.save();
+            
+            // Efek Bayangan / Glow saat di-drag
+            if (this.isDragging) {
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = this.glow;
+            }
+
+            for (let r = 0; r < this.matrix.length; r++) {
+                for (let c = 0; c < this.matrix[r].length; c++) {
+                    if (this.matrix[r][c]) {
+                        let bx = this.x + c * size;
+                        let by = this.y + r * size;
+                        
+                        // Gambar Balok Utama (Glow Neon Style)
+                        ctx.fillStyle = this.color;
+                        ctx.fillRect(bx, by, size - 3, size - 3);
+
+                        // Glossy Highlight / Efek Kaca Mengkilap di bagian atas balok
+                        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+                        ctx.fillRect(bx + 2, by + 2, size - 7, size / 3);
+                    }
+                }
+            }
+            ctx.restore();
+        }
+
+        contains(mx, my) {
+            let size = this.currentCellSize;
+            return mx >= this.x && mx <= this.x + this.matrix[0].length * size &&
+                   my >= this.y && my <= this.y + this.matrix.length * size;
+        }
+    }
+
+    function createExplosion(gridX, gridY, color) {
+        let cx = GRID_OFFSET_X + gridX * CELL_SIZE + CELL_SIZE / 2;
+        let cy = GRID_OFFSET_Y + gridY * CELL_SIZE + CELL_SIZE / 2;
+        for (let i = 0; i < 8; i++) {
+            particles.push(new Particle(cx, cy, color));
+        }
+    }
+
+    function spawnPieces() {
+        pieces = [];
+        for (let i = 0; i < 3; i++) {
+            let randShape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+            pieces.push(new Piece(randShape, i));
+        }
+        if (checkGameOver()) endGame();
+    }
+
+    function drawGrid() {
+        // Gambar Shadow Preview / Bayangan Penempatan Real-Time
+        if (selectedPiece) {
+            let gridX = Math.round((selectedPiece.x - GRID_OFFSET_X) / CELL_SIZE);
+            let gridY = Math.round((selectedPiece.y - GRID_OFFSET_Y) / CELL_SIZE);
+            if (canPlace(selectedPiece, gridX, gridY)) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+                for (let r = 0; r < selectedPiece.matrix.length; r++) {
+                    for (let c = 0; c < selectedPiece.matrix[r].length; c++) {
+                        if (selectedPiece.matrix[r][c]) {
+                            ctx.fillRect(GRID_OFFSET_X + (gridX + c) * CELL_SIZE, GRID_OFFSET_Y + (gridY + r) * CELL_SIZE, CELL_SIZE - 3, CELL_SIZE - 3);
+                        }
+                    }
+                }
+                ctx.restore();
+            }
+        }
+
+        // Gambar Grid Board
+        for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                if (grid[r][c]) {
+                    ctx.save();
+                    ctx.fillStyle = grid[r][c].color;
+                    ctx.fillRect(GRID_OFFSET_X + c * CELL_SIZE, GRID_OFFSET_Y + r * CELL_SIZE, CELL_SIZE - 3, CELL_SIZE - 3);
+                    // Overlay kilauan interior grid
+                    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                    ctx.fillRect(GRID_OFFSET_X + c * CELL_SIZE + 2, GRID_OFFSET_Y + r * CELL_SIZE + 2, CELL_SIZE - 7, CELL_SIZE / 3);
+                    ctx.restore();
+                } else {
+                    ctx.fillStyle = '#161920';
+                    ctx.fillRect(GRID_OFFSET_X + c * CELL_SIZE, GRID_OFFSET_Y + r * CELL_SIZE, CELL_SIZE - 3, CELL_SIZE - 3);
+                }
+            }
+        }
+    }
+
+    function checkLines() {
+        let rowsToRemove = [];
+        let colsToRemove = [];
+
+        for (let r = 0; r < GRID_SIZE; r++) {
+            if (grid[r].every(cell => cell !== 0)) rowsToRemove.push(r);
+        }
+        for (let c = 0; c < GRID_SIZE; c++) {
+            let colFull = true;
+            for (let r = 0; r < GRID_SIZE; r++) {
+                if (grid[r][c] === 0) { colFull = false; break; }
+            }
+            if (colFull) colsToRemove.push(c);
+        }
+
+        let cleared = rowsToRemove.length + colsToRemove.length;
+        if (cleared > 0) {
+            playSound('blast');
+            
+            // Efek Ledakan Partikel
+            rowsToRemove.forEach(r => {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    createExplosion(c, r, grid[r][c].color || '#fff');
+                    grid[r][c] = 0;
+                }
+            });
+            colsToRemove.forEach(c => {
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    if (grid[r][c] !== 0) {
+                        createExplosion(c, r, grid[r][c].color || '#fff');
+                        grid[r][c] = 0;
+                    }
+                }
+            });
+
+            // Combo system multiplier
+            score += cleared * 15 * cleared;
+            scoreEl.innerText = score;
+        }
+    }
+
+    function canPlace(piece, gridX, gridY) {
+        for (let r = 0; r < piece.matrix.length; r++) {
+            for (let c = 0; c < piece.matrix[r].length; c++) {
+                if (piece.matrix[r][c]) {
+                    let targetX = gridX + c;
+                    let targetY = gridY + r;
+                    if (targetX < 0 || targetX >= GRID_SIZE || targetY < 0 || targetY >= GRID_SIZE) return false;
+                    if (grid[targetY][targetX] !== 0) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    function checkGameOver() {
+        for (let piece of pieces) {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (canPlace(piece, c, r)) return false;
+                }
+            }
+        }
+        return pieces.length > 0;
+    }
+
+    function endGame() {
+        playSound('gameover');
+        gameOverScreen.style.display = 'flex';
+        finalScoreEl.innerText = score;
+    }
+
+    function resetGame() {
+        grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+        score = 0;
+        scoreEl.innerText = score;
+        gameOverScreen.style.display = 'none';
+        particles = [];
+        spawnPieces();
+    }
+
+    function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: (clientX - rect.left) * (canvas.width / rect.width),
+            y: (clientY - rect.top) * (canvas.height / rect.height)
+        };
+    }
+
+    function startDrag(e) {
+        let pos = getMousePos(e);
+        for (let piece of pieces) {
+            if (piece.contains(pos.x, pos.y)) {
+                playSound('pickup');
+                selectedPiece = piece;
+                piece.isDragging = true;
+                
+                // Offset drag agar posisi balok pas di tengah/atas jari/kursor
+                dragOffset.x = pos.x - piece.x;
+                dragOffset.y = pos.y - piece.y;
+                break;
+            }
+        }
+    }
+
+    function doDrag(e) {
+        if (!selectedPiece) return;
+        e.preventDefault();
+        let pos = getMousePos(e);
+        selectedPiece.x = pos.x - dragOffset.x;
+        selectedPiece.y = pos.y - dragOffset.y;
+    }
+
+    function endDrag(e) {
+        if (!selectedPiece) return;
+        
+        let gridX = Math.round((selectedPiece.x - GRID_OFFSET_X) / CELL_SIZE);
+        let gridY = Math.round((selectedPiece.y - GRID_OFFSET_Y) / CELL_SIZE);
+
+        if (canPlace(selectedPiece, gridX, gridY)) {
+            playSound('place');
+            for (let r = 0; r < selectedPiece.matrix.length; r++) {
+                for (let c = 0; c < selectedPiece.matrix[r].length; c++) {
+                    if (selectedPiece.matrix[r][c]) {
+                        grid[gridY + r][gridX + c] = {
+                            color: selectedPiece.color,
+                            glow: selectedPiece.glow
+                        };
+                    }
+                }
+            }
+            score += 5;
+            scoreEl.innerText = score;
+            
+            pieces = pieces.filter(p => p !== selectedPiece);
+            checkLines();
+
+            if (pieces.length === 0) spawnPieces();
+            else if (checkGameOver()) endGame();
+        } else {
+            selectedPiece.resetPosition();
+        }
+
+        selectedPiece.isDragging = false;
+        selectedPiece = null;
+    }
+
+    canvas.addEventListener('mousedown', startDrag);
+    canvas.addEventListener('mousemove', doDrag);
+    window.addEventListener('mouseup', endDrag);
+
+    canvas.addEventListener('touchstart', startDrag, { passive: false });
+    canvas.addEventListener('touchmove', doDrag, { passive: false });
+    window.addEventListener('touchend', endDrag);
+
+    // Core Loop Engine
+    function update() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        drawGrid();
+        
+        // Slot Bawah Dock
+        ctx.fillStyle = 'rgba(15, 20, 28, 0.8)';
+        ctx.fillRect(15, 450, 390, 135);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.strokeRect(15, 450, 390, 135);
+
+        for (let piece of pieces) {
+            piece.draw();
+        }
+
+        // Update Partikel ledakan
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            particles[i].draw();
+            if (particles[i].alpha <= 0) particles.splice(i, 1);
+        }
+
+        requestAnimationFrame(update);
+    }
+
+    spawnPieces();
+    update();
+</script>
+</body>
+</html>
